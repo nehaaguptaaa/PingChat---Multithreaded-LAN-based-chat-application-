@@ -1,0 +1,10 @@
+
+
+2026-08-10 17:20:14.854 | ERROR | c.c.p.websocket.ChatWebSocketHandler | Component=WebSocket | Event=CONNECT_FAILED | User=testuser123 | Msg="Unknown username attempted connection"
+
+2026-08-10 17:20:22.949 | ERROR | c.c.p.websocket.ChatWebSocketHandler | Component=WebSocket | Event=MESSAGE_HANDLE_FAILED | SessionId=9708ed67-556e-4dc7-22c4-d00ea11bdf0b | Msg="Failed to process incoming message" | Exception=JsonParseException | At=com.fasterxml.jackson.core.JsonParser._constructError(JsonParser.java:2584)
+
+2026-08-10 17:29:33.365 | ERROR | c.c.p.websocket.ChatWebSocketHandler | Component=WebSocket | Event=TRANSPORT_ERROR | SessionId=00be6870-909d-72f0-a05f-bcdfee497de3 | Msg="Transport-level error" | Exception=IOException | At=org.apache.tomcat.websocket.WsRemoteEndpointImplBase.sendMessageBlockInternal(WsRemoteEndpointImplBase.java:326)
+
+2026-08-10 17:29:33.696 | ERROR | c.c.p.websocket.ChatWebSocketHandler | Component=WebSocket | Event=TRANSPORT_ERROR | SessionId=87d97d46-1306-99ff-2699-8ee9d9268fc3 | Msg="Transport-level error" | Exception=IOException | At=org.apache.tomcat.websocket.WsRemoteEndpointImplBase.sendMessageBlockInternal(WsRemoteEndpointImplBase.java:326)
+
