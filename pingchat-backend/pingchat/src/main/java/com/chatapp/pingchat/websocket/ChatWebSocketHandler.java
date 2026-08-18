@@ -2,6 +2,7 @@ package com.chatapp.pingchat.websocket;
 
 import com.chatapp.pingchat.dto.ChatMessage;
 import com.chatapp.pingchat.entity.Message;
+import com.chatapp.pingchat.entity.User;
 import com.chatapp.pingchat.repository.MessageRepository;
 import com.chatapp.pingchat.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,6 +16,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
@@ -32,30 +34,71 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private UserRepository userRepository;
 
     @Override
-    public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+    public void afterConnectionEstablished(WebSocketSession session) {
 
-        String username = getUsername(session);
-        activeSessions.put(username, session);
-        logger.info("Component=WebSocket | Event=CONNECT | User={} | Thread={}", username, Thread.currentThread().getName());
+        String username = null;
 
-        var userOptional = userRepository.findByUsername(username);
+        try {
+            username = getUsername(session);
 
-        if (userOptional.isEmpty()) {
-            logger.error("Component=WebSocket | Event=CONNECT_FAILED | User={} | Msg=\"Unknown username attempted connection\"", username);
-            return;
+            activeSessions.put(username, session);
+
+            logger.info(
+                    "Component=WebSocket | Event=CONNECT | User={} | Thread={}",
+                    username,
+                    Thread.currentThread().getName()
+            );
+
+            Optional<User> userOptional = userRepository.findByUsername(username);
+
+            if (userOptional.isEmpty()) {
+                logger.error(
+                        "Component=WebSocket | Event=CONNECT_FAILED | User={} | Msg=\"Unknown username attempted connection\"",
+                        username
+                );
+
+                activeSessions.remove(username);
+                session.close();
+                return;
+            }
+
+            var user = userOptional.get();
+
+            user.setOnline(true);
+            userRepository.save(user);
+
+            String onlineList = String.join(",", activeSessions.keySet());
+
+            ChatMessage listMsg = new ChatMessage(
+                    "PRESENCE_LIST",
+                    null,
+                    null,
+                    onlineList,
+                    System.currentTimeMillis()
+            );
+
+            session.sendMessage(
+                    new TextMessage(
+                            objectMapper.writeValueAsString(listMsg)
+                    )
+            );
+
+            broadcastPresence(username, "online");
+
+        } catch (Exception e) {
+
+            logger.error(
+                    "Component=WebSocket | Event=CONNECTION_ERROR | User={} | Error={}",
+                    username,
+                    e.getMessage(),
+                    e
+            );
+
+            if (username != null) {
+                activeSessions.remove(username);
+            }
         }
-
-        var user = userOptional.get();
-        user.setOnline(true);
-        userRepository.save(user);
-
-        String onlineList = String.join(",", activeSessions.keySet());
-        ChatMessage listMsg = new ChatMessage("PRESENCE_LIST", null, null, onlineList, System.currentTimeMillis());
-        session.sendMessage(new TextMessage(objectMapper.writeValueAsString(listMsg)));
-
-        broadcastPresence(username, "online");
     }
-
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         try {
@@ -112,33 +155,85 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     private void broadcastPresence(String username, String status) {
         try {
-            ChatMessage presenceMsg = new ChatMessage("PRESENCE", username, null, status, System.currentTimeMillis());
+
+            ChatMessage presenceMsg = new ChatMessage(
+                    "PRESENCE",
+                    username,
+                    null,
+                    status,
+                    System.currentTimeMillis()
+            );
+
             String payload = objectMapper.writeValueAsString(presenceMsg);
+
+            logger.info(
+                    "📡 PRESENCE BROADCAST | User={} | Status={} | ActiveUsers={}",
+                    username,
+                    status,
+                    activeSessions.keySet()
+            );
+
             for (Map.Entry<String, WebSocketSession> entry : activeSessions.entrySet()) {
+
                 if (!entry.getKey().equals(username) && entry.getValue().isOpen()) {
-                    entry.getValue().sendMessage(new TextMessage(payload));
+
+                    logger.info(
+                            "📤 Sending presence {}={} to {}",
+                            username,
+                            status,
+                            entry.getKey()
+                    );
+
+                    entry.getValue().sendMessage(
+                            new TextMessage(payload)
+                    );
                 }
             }
+
         } catch (Exception e) {
-            logger.error("Component=WebSocket | Event=PRESENCE_BROADCAST_FAILED | User={} | Msg=\"Failed to broadcast presence\" | {}",
-                    username, formatException(e));
+            logger.error(
+                    "Component=WebSocket | Event=PRESENCE_BROADCAST_FAILED | User={} | Msg=\"Failed to broadcast presence\" | {}",
+                    username,
+                    formatException(e)
+            );
         }
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        String username = getUsername(session);
-        activeSessions.remove(username);
 
-        userRepository.findByUsername(username).ifPresent(user -> {
-            user.setOnline(false);
-            userRepository.save(user);
-        });
+        String username = null;
 
-        logger.info("Component=WebSocket | Event=DISCONNECT | User={} | Reason={}", username, status);
-        broadcastPresence(username, "offline");
+        try {
+            username = getUsername(session);
+
+            activeSessions.remove(username);
+
+            userRepository.findByUsername(username).ifPresent(user -> {
+                user.setOnline(false);
+                userRepository.save(user);
+            });
+
+            logger.info(
+                    "Component=WebSocket | Event=DISCONNECT | User={} | Reason={}",
+                    username,
+                    status
+            );
+
+            broadcastPresence(username, "offline");
+
+        } catch (Exception e) {
+
+            logger.error(
+                    "Component=WebSocket | Event=DISCONNECT_FAILED | User={} | Error={}",
+                    username,
+                    e.getMessage(),
+                    e
+            );
+        }
     }
 
+    // if transport error occurs calls this ex.connection network error
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) {
         logger.error("Component=WebSocket | Event=TRANSPORT_ERROR | SessionId={} | Msg=\"Transport-level error\" | {}",
