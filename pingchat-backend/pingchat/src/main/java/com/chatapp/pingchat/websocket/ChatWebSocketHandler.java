@@ -5,7 +5,10 @@ import com.chatapp.pingchat.entity.Message;
 import com.chatapp.pingchat.entity.User;
 import com.chatapp.pingchat.repository.MessageRepository;
 import com.chatapp.pingchat.repository.UserRepository;
+import com.chatapp.pingchat.server.ServerStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,10 +18,13 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
+@AllArgsConstructor
+@NoArgsConstructor
 @Component
 public class ChatWebSocketHandler extends TextWebSocketHandler {
 
@@ -31,6 +37,9 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private MessageRepository messageRepository;
 
     @Autowired
+    private ServerStatus serverStatus;
+
+    @Autowired
     private UserRepository userRepository;
 
     @Override
@@ -39,6 +48,20 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         String username = null;
 
         try {
+
+            if (!serverStatus.isRunning()) {
+                try {
+                    session.close(
+                            new CloseStatus(
+                                    503,
+                                    "Server is offline"
+                            )
+                    );
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                return;
+            }
             username = getUsername(session);
 
             activeSessions.put(username, session);
@@ -142,13 +165,20 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private void broadcastMessage(ChatMessage chatMessage) {
         try {
             String payload = objectMapper.writeValueAsString(chatMessage);
-            for (WebSocketSession s : activeSessions.values()) {
-                if (s.isOpen()) {
-                    s.sendMessage(new TextMessage(payload));
+            activeSessions.entrySet().removeIf(entry -> {
+                WebSocketSession s = entry.getValue();
+                if (!s.isOpen()) {
+                    return true; // drop stale session
                 }
-            }
+                try {
+                    s.sendMessage(new TextMessage(payload));
+                } catch (Exception e) {
+                    logger.error("Failed to send to {}: {}", entry.getKey(), e.getMessage());
+                }
+                return false;
+            });
         } catch (Exception e) {
-            logger.error("Component=WebSocket | Event=BROADCAST_FAILED | From={} | Msg=\"Failed to broadcast message\" | {}",
+            logger.error("Component=WebSocket | Event=BROADCAST_FAILED | From={} | {}",
                     chatMessage.getSender(), formatException(e));
         }
     }
@@ -240,6 +270,86 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 session.getId(), formatException(exception));
     }
 
+    public void disconnectAllUsers() {
+
+        logger.info(
+                " SERVER STOP | Active sessions before closing = {}",
+                activeSessions.keySet()
+        );
+
+        for (Map.Entry<String, WebSocketSession> entry : activeSessions.entrySet()) {
+
+            String username = entry.getKey();
+            WebSocketSession session = entry.getValue();
+
+            try {
+                logger.info(
+                        " Closing WebSocket | User={} | SessionId={} | Open={}",
+                        username,
+                        session.getId(),
+                        session.isOpen()
+                );
+
+                if (session.isOpen()) {
+                    session.close(new CloseStatus(1001, "Server stopped"));
+                }
+
+            } catch (Exception e) {
+
+                logger.error(
+                        " Failed to close WebSocket | User={} | Error={}",
+                        username,
+                        e.getMessage(),
+                        e
+                );
+            }
+        }
+
+        logger.info(
+                "SERVER STOP | Active sessions after closing request = {}",
+                activeSessions.keySet()
+        );
+    }
+
+    public void closeAllSessions() {
+
+        logger.info("Component=WebSocket | Event=SERVER_STOPPING | ActiveUsers={}",
+                activeSessions.keySet());
+
+        for (Map.Entry<String, WebSocketSession> entry : activeSessions.entrySet()) {
+
+            String username = entry.getKey();
+            WebSocketSession session = entry.getValue();
+
+            try {
+
+                if (session.isOpen()) {
+
+                    session.close(
+                            new CloseStatus(
+                                    1001,
+                                    "Server stopped"
+                            )
+                    );
+
+                    logger.info(
+                            "Component=WebSocket | Event=SESSION_CLOSED | User={} | Reason=Server stopped",
+                            username
+                    );
+                }
+
+            } catch (IOException e) {
+
+                logger.error(
+                        "Component=WebSocket | Event=SESSION_CLOSE_FAILED | User={} | Error={}",
+                        username,
+                        e.getMessage()
+                );
+            }
+        }
+
+        activeSessions.clear();
+    }
     private String getUsername(WebSocketSession session) {
         String query = session.getUri().getQuery();
         return query.replace("username=", "");

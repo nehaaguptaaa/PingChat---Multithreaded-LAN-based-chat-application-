@@ -5,10 +5,12 @@ import com.chatapp.pingchat.dto.LoginRequest;
 import com.chatapp.pingchat.dto.RegisterRequest;
 import com.chatapp.pingchat.entity.User;
 import com.chatapp.pingchat.repository.UserRepository;
+import com.chatapp.pingchat.server.ServerStatus;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -26,6 +28,9 @@ public class AuthController {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private ServerStatus serverStatus;
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request) {
@@ -47,6 +52,11 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest request) {
+        if (!serverStatus.isRunning()) {
+            return ResponseEntity
+                    .status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body("Server is currently offline");
+        }
         User user = userRepository.findByUsername(request.getUsername()).orElse(null);
 
         if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {

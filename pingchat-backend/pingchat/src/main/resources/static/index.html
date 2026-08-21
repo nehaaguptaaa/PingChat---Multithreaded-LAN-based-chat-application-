@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PingChat Server</title>
+
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #0B1120;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+
+        .container {
+            text-align: center;
+            background: #141B2D;
+            padding: 40px;
+            border-radius: 15px;
+            width: 300px;
+        }
+
+        h1 {
+            margin-bottom: 30px;
+        }
+
+        #status {
+            font-size: 20px;
+            margin-bottom: 25px;
+        }
+
+        button {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>PingChat Server</h1>
+
+    <div id="status">
+        Checking server...
+    </div>
+
+    <button id="toggleButton" onclick="toggleServer()">
+        Loading...
+    </button>
+
+</div>
+
+<script>
+
+    async function loadStatus() {
+
+        const response = await fetch("/server/status");
+        const running = await response.json();
+
+        updateUI(running);
+    }
+
+
+    function updateUI(running) {
+
+        const status = document.getElementById("status");
+        const button = document.getElementById("toggleButton");
+
+        if (running) {
+
+            status.innerHTML = "🟢 Server ON";
+            button.innerHTML = "TURN OFF";
+
+        } else {
+
+            status.innerHTML = "🔴 Server OFF";
+            button.innerHTML = "TURN ON";
+        }
+    }
+
+
+    async function toggleServer() {
+
+        const response = await fetch(
+            document.getElementById("status").innerText.includes("ON")
+                ? "/server/stop"
+                : "/server/start",
+            {
+                method: "POST"
+            }
+        );
+
+        await loadStatus();
+    }
+
+
+    loadStatus();
+
+</script>
+
+</body>
+</html>
